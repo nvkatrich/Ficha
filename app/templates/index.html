@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>КП · Bitrix24</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="#top"><span class="brand-mark">КП</span><span>Конструктор<br><b>Bitrix24</b></span></a>
+      <nav>
+        <a href="#generator">Создать КП</a>
+        <a href="#templates">Шаблоны</a>
+        <a href="#settings">Настройки</a>
+        <a href="#help">Справка</a>
+      </nav>
+      <div class="side-note">
+        <b>Локальный режим</b>
+        <span>Шаблоны, доступы и документы остаются на вашем компьютере.</span>
+      </div>
+    </aside>
+
+    <main id="top">
+      <header class="topbar">
+        <div><p class="eyebrow">ЛОКАЛЬНОЕ ПРИЛОЖЕНИЕ</p><h1>Коммерческие предложения из сделок</h1></div>
+        <div id="connectionBadge" class="connection {% if settings.has_webhook or settings.has_oauth_token %}configured{% endif %}">
+          <i></i>{% if settings.has_webhook or settings.has_oauth_token %}Доступ Bitrix24 сохранён{% else %}Подключение не настроено{% endif %}
+        </div>
+      </header>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}<section class="flash-stack">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</section>{% endif %}
+      {% endwith %}
+
+      <section id="generator" class="panel generator-grid">
+        <div class="panel-intro">
+          <p class="eyebrow">01 · СОЗДАТЬ ДОКУМЕНТ</p>
+          <h2>Сформируйте КП по ID сделки</h2>
+          <p>Приложение берёт реквизиты сделки и клиента, получает табличную часть из спецификации в комментарии и подставляет данные в ваш Word- или PowerPoint-шаблон.</p>
+          <div class="hint-card"><b>Сначала добавьте шаблон</b><span>В шаблоне используйте метки вида <code>{% raw %}{{deal.title}}{% endraw %}</code>.</span></div>
+        </div>
+        <form id="generatorForm" class="form-card" action="{{ url_for('generate') }}" method="post">
+          <label>Шаблон
+            <select id="templateSelect" name="template_id" required>
+              <option value="">Выберите шаблон</option>
+              {% for template in templates %}<option value="{{ template.id }}" data-kind="{{ template.kind|default('docx') }}" data-placeholders='{{ template.placeholders | tojson }}'>{{ template.name }} ({{ template.kind|default('docx')|upper }})</option>{% endfor %}
+            </select>
+          </label>
+          <div class="form-row">
+            <label>ID сделки<input id="dealId" name="deal_id" type="number" min="1" placeholder="Например, 410" required></label>
+            <label>Имя файла<input name="output_name" type="text" placeholder="КП_клиент_дата"></label>
+          </div>
+          <label>Источник табличной части
+            <select id="specificationSelect" name="specification_key"><option value="">Товарные позиции из CRM</option></select>
+            <small>Можно выбрать XLSX, XLS, DOCX, PPTX, CSV или текстовый PDF, прикреплённый к комментарию сделки. Файл не меняется.</small>
+          </label>
+          <button id="loadSpecifications" class="text-button source-button" type="button">Найти спецификации в комментариях сделки</button>
+          <label>Формат выдачи
+            <div class="format-options">
+              <label class="radio format-docx"><input type="radio" name="output_format" value="docx" checked><span>Word (.docx)</span></label>
+              <label class="radio format-pptx hidden"><input type="radio" name="output_format" value="pptx"><span>PowerPoint (.pptx)</span></label>
+              <label class="radio"><input type="radio" name="output_format" value="pdf"><span>PDF <small>требуется LibreOffice</small></span></label>
+            </div>
+          </label>
+          <div class="form-actions">
+            <button id="previewButton" class="button secondary" type="button">Проверить данные</button>
+            <button class="button primary" type="submit">Сформировать КП</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="previewPanel" class="panel preview-panel hidden">
+        <div class="section-heading"><div><p class="eyebrow">ПРОВЕРКА ПОДСТАНОВОК</p><h2 id="previewTitle">Данные сделки</h2></div><span id="previewState" class="muted">Загрузите сделку</span></div>
+        <p class="subtle">При необходимости измените конкретное значение только для этого документа. Исходные данные в Bitrix24 не меняются.</p>
+        <div id="previewFields" class="field-grid"></div>
+        <div id="productsPreview" class="products-preview"></div>
+      </section>
+
+      <section id="templates" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">02 · БИБЛИОТЕКА</p><h2>Шаблоны документов</h2></div><span class="muted">{{ templates|length }} шт.</span></div>
+        <div class="template-layout">
+          <form action="{{ url_for('upload_template') }}" method="post" enctype="multipart/form-data" class="upload-box">
+            <div class="upload-icon">+</div>
+            <div><b>Добавить шаблон</b><p>Формат .docx или .pptx, до 20 МБ</p></div>
+            <label>Название шаблона<input type="text" name="display_name" placeholder="Например, КП на услуги"></label>
+            <label class="file-input"><input type="file" name="template" accept=".docx,.pptx" required><span>Выбрать .docx или .pptx</span></label>
+            <button class="button primary wide" type="submit">Загрузить шаблон</button>
+          </form>
+          <div class="template-list">
+            {% if templates %}
+              {% for template in templates %}
+              <article class="template-item">
+                <div class="doc-icon">{{ 'P' if template.kind|default('docx') == 'pptx' else 'W' }}</div><div class="template-info"><b>{{ template.name }}</b><p>{% if template.placeholders %}{{ template.placeholders|length }} меток: {% for placeholder in template.placeholders[:4] %}<code>{% raw %}{{{% endraw %}{{ placeholder }}{% raw %}}}{% endraw %}</code>{% endfor %}{% if template.placeholders|length > 4 %}…{% endif %}{% else %}{% if template.kind|default('docx') == 'pptx' %}Нативный PowerPoint · метки не обязательны для именованных объектов{% else %}Метки ещё не добавлены{% endif %}{% endif %}</p></div>
+                <div class="item-actions"><a href="{{ url_for('download_template', template_id=template.id) }}" title="Скачать исходник">↓</a><form method="post" action="{{ url_for('delete_template', template_id=template.id) }}" onsubmit="return confirm('Удалить шаблон?');"><button title="Удалить" type="submit">×</button></form></div>
+              </article>
+              {% endfor %}
+            {% else %}<div class="empty-state">Пока нет шаблонов. Загрузите фирменный Word- или PowerPoint-файл, затем выберите его в конструкторе.</div>{% endif %}
+          </div>
+        </div>
+      </section>
+
+      <section id="settings" class="panel settings-panel">
+        <div class="section-heading"><div><p class="eyebrow">03 · ПОДКЛЮЧЕНИЕ И РЕКВИЗИТЫ</p><h2>Настройки</h2></div><button id="checkConnection" class="text-button" type="button">Проверить доступ</button></div>
+        <form action="{{ url_for('update_settings') }}" method="post">
+          <div class="auth-choice">
+            <label class="choice"><input type="radio" name="bitrix_auth_type" value="webhook" {% if settings.bitrix_auth_type != 'oauth' %}checked{% endif %}><span><b>Входящий вебхук</b><small>Самый быстрый вариант для запуска на одном ноутбуке.</small></span></label>
+            <label class="choice"><input type="radio" name="bitrix_auth_type" value="oauth" {% if settings.bitrix_auth_type == 'oauth' %}checked{% endif %}><span><b>Локальное приложение</b><small>Открывается прямо из Bitrix24 через защищённый HTTPS-адрес.</small></span></label>
+          </div>
+          <div id="webhookFields" class="auth-fields">
+            <label>URL входящего вебхука Bitrix24
+              <input name="bitrix_webhook_url" type="password" autocomplete="off" placeholder="{% if settings.has_webhook %}URL сохранён локально — введите новый только для замены{% else %}https://portal.bitrix24.ru/rest/1/секретный_код/{% endif %}">
+              <small>Выберите права <b>CRM</b> и не передавайте этот URL третьим лицам.</small>
+            </label>
+          </div>
+          <div id="oauthFields" class="auth-fields hidden">
+            <label>Домен Bitrix24<input name="bitrix_domain" type="text" value="{{ settings.bitrix_domain }}" placeholder="portal.bitrix24.ru"></label>
+            <p class="oauth-info">Токен не вводится вручную: его передаёт Bitrix24 при открытии зарегистрированного локального приложения. {% if settings.has_oauth_token %}<b>Токен сохранён локально.</b>{% endif %}</p>
+          </div>
+          <div class="automation-box">
+            <div><p class="eyebrow">АВТОМАТИЧЕСКОЕ СОЗДАНИЕ</p><h3>Генерировать КП при изменении сделки</h3><p>При включении Bitrix24 отправляет событие на ваш публичный HTTPS-адрес. Документ сохраняется локально, без изменения исходной сделки.</p></div>
+            <label class="toggle"><input name="automation_enabled" type="checkbox" {% if settings.automation_enabled == 'true' %}checked{% endif %}><span></span><b>Включить</b></label>
+            <div class="automation-grid">
+              <label>Шаблон для автоматизации<select name="automation_template_id"><option value="">Выберите шаблон</option>{% for template in templates %}<option value="{{ template.id }}" {% if settings.automation_template_id == template.id %}selected{% endif %}>{{ template.name }}</option>{% endfor %}</select></label>
+              <label>Стадия сделки (необязательно)<input name="automation_stage_id" value="{{ settings.automation_stage_id }}" type="text" placeholder="Например, PREPARATION"></label>
+              <label class="span-2">Защитный токен исходящего вебхука<input name="automation_token" type="password" autocomplete="off" placeholder="{% if settings.has_automation_token %}Токен сохранён — введите новый только для замены{% else %}Скопируйте токен из настройки вебхука Bitrix24{% endif %}"><small>Нужен для проверки, что событие действительно отправил ваш портал.</small></label>
+            </div>
+          </div>
+          <hr>
+          <h3>Ваши реквизиты для подстановки</h3>
+          <div class="settings-grid">
+            <label>Наименование<input name="company_name" value="{{ settings.company_name }}" type="text" placeholder="ООО «Компания»"></label>
+            <label>ИНН<input name="company_inn" value="{{ settings.company_inn }}" type="text" placeholder="1234567890"></label>
+            <label>Телефон<input name="company_phone" value="{{ settings.company_phone }}" type="text" placeholder="+7 999 000-00-00"></label>
+            <label>E-mail<input name="company_email" value="{{ settings.company_email }}" type="email" placeholder="mail@company.ru"></label>
+            <label class="span-2">Адрес<input name="company_address" value="{{ settings.company_address }}" type="text" placeholder="г. Москва, …"></label>
+            <label>Префикс номера<input name="document_prefix" value="{{ settings.document_prefix }}" type="text" placeholder="КП"></label>
+            <label>Часовой пояс<input name="timezone" value="{{ settings.timezone }}" type="text" placeholder="Europe/Moscow"></label>
+          </div>
+          <button class="button primary" type="submit">Сохранить настройки</button>
+        </form>
+      </section>
+
+      <section class="panel documents-panel">
+        <div class="section-heading"><div><p class="eyebrow">ЛОКАЛЬНЫЙ ЖУРНАЛ</p><h2>Последние документы</h2></div><span class="muted">Хранятся только в data/documents</span></div>
+        <div class="document-list">
+        {% if documents %}{% for document in documents %}
+          <a class="document-item" href="{{ url_for('download_document', filename=document.filename) }}"><div class="file-badge">{{ document.filename.rsplit('.', 1)[-1]|upper }}</div><div><b>{{ document.deal_title or ('Сделка #' ~ document.deal_id) }}</b><p>{{ document.template_name }} · {{ 'автоматически' if document.source == 'automation' else 'вручную' }}</p></div><span>Скачать ↓</span></a>
+        {% endfor %}{% else %}<div class="empty-state">Сформированные КП появятся здесь. Они также остаются в локальной папке <code>data/documents</code>.</div>{% endif %}
+        </div>
+      </section>
+
+      <section id="help" class="help-grid">
+        <article class="help-card"><p class="eyebrow">МЕТКИ В WORD</p><h2>Как подготовить шаблон</h2><p>Откройте копию вашего шаблона в Microsoft Word или LibreOffice и поставьте метки в нужных местах. Не разбивайте одну метку разным форматированием.</p><div class="token-list"><code>{% raw %}{{document.number}}{% endraw %}</code><code>{% raw %}{{deal.title}}{% endraw %}</code><code>{% raw %}{{client.company}}{% endraw %}</code><code>{% raw %}{{seller.name}}{% endraw %}</code><code>{% raw %}{{manager.name}}{% endraw %}</code><code>{% raw %}{{products.table}}{% endraw %}</code></div><a href="#tokenReference">Все метки ниже ↓</a></article>
+        <article id="tokenReference" class="help-card token-reference"><p class="eyebrow">СПРАВОЧНИК МЕТОК</p><h2>Данные, доступные в шаблоне</h2><div class="reference-columns"><p><b>Документ</b><br><code>{% raw %}{{document.number}}{% endraw %}</code><br><code>{% raw %}{{document.date}}{% endraw %}</code></p><p><b>Сделка</b><br><code>{% raw %}{{deal.id}}{% endraw %}</code><br><code>{% raw %}{{deal.title}}{% endraw %}</code><br><code>{% raw %}{{deal.amount}}{% endraw %}</code><br><code>{% raw %}{{deal.close_date}}{% endraw %}</code></p><p><b>Клиент</b><br><code>{% raw %}{{client.company}}{% endraw %}</code><br><code>{% raw %}{{client.contact_name}}{% endraw %}</code><br><code>{% raw %}{{client.phone}}{% endraw %}</code><br><code>{% raw %}{{client.email}}{% endraw %}</code></p><p><b>Ваша компания</b><br><code>{% raw %}{{seller.name}}{% endraw %}</code><br><code>{% raw %}{{seller.inn}}{% endraw %}</code><br><code>{% raw %}{{seller.phone}}{% endraw %}</code><br><code>{% raw %}{{manager.name}}{% endraw %}</code></p></div><p class="notice"><b>Таблица товаров:</b> поместите отдельную метку <code>{% raw %}{{products.table}}{% endraw %}</code> в абзац, на месте которого программа создаст таблицу. Сумма сделки — <code>{% raw %}{{products_total}}{% endraw %}</code>. Поля сделки пользователя: <code>{% raw %}{{deal.custom.UF_CRM_…}}{% endraw %}</code>.</p></article>
+      </section>
+      <footer>КП · Bitrix24 &nbsp;—&nbsp; локальный сервис. Документы удаляются вручную из папки <code>data/documents</code>.</footer>
+    </main>
+  </div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
